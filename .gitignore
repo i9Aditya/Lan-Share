@@ -1,0 +1,71 @@
+# =====================================================================
+# LAN Share - Git Ignore Rules
+# =====================================================================
+
+# Build artifacts & Maven target directory
+target/
+*.jar
+*.war
+*.nar
+*.ear
+*.class
+
+# User uploaded shared data & files
+data/uploads/*
+!data/uploads/.gitkeep
+/uploads/
+
+# Embedded H2 database files & runtime metadata
+data/db/*
+!data/db/.gitkeep
+*.mv.db
+*.trace.db
+
+# Runtime logs
+logs/
+*.log
+/tmp/lan-share.log
+
+# Process ID files & temporary runtime locks
+*.pid
+lan-share.pid
+
+# Local configuration overrides & environment secret files
+*.local
+*.local.conf
+*.env
+.env
+.env.*
+*.conf.local
+
+# IDE & Editor files
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.code-workspace
+.project
+.classpath
+.settings/
+.nb-gradle/
+nbproject/
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Temporary & backup files
+tmp/
+scratch/
+*.tmp
+*.bak
+*.orig

@@ -1,0 +1,400 @@
+#!/usr/bin/env bash
+# =====================================================================
+# LAN Share - Unified CLI Manager for Linux (Fedora & Ubuntu)
+# =====================================================================
+
+# Detect Linux Distribution
+DISTRO_NAME="Linux"
+if [ -f /etc/os-release ]; then
+    DISTRO_NAME=$(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"')
+    [ -z "$DISTRO_NAME" ] && DISTRO_NAME="Linux"
+fi
+
+# Detect user paths following XDG Base Directory standard
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+USER_CONF_FILE="$XDG_CONFIG_HOME/lan-share/lan-share.conf"
+USER_APP_DIR="$XDG_DATA_HOME/lan-share"
+USER_JAR_FILE="$USER_APP_DIR/lan-share.jar"
+USER_SERVICE="lan-share.service"
+LOCAL_CONF_FILE="./lan-share.conf"
+LOCAL_JAR_FILE="./target/lan-share-1.0.0.jar"
+LOCAL_PID_FILE="./lan-share.pid"
+
+# Determine config file
+if [ -f "$USER_CONF_FILE" ]; then
+    CONF_FILE="$USER_CONF_FILE"
+elif [ -f "$LOCAL_CONF_FILE" ]; then
+    CONF_FILE="$(readlink -f "$LOCAL_CONF_FILE")"
+else
+    CONF_FILE=""
+fi
+
+# Load config if present
+if [ -n "$CONF_FILE" ] && [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$CONF_FILE"
+fi
+
+PORT="${PORT:-8080}"
+HOST="${HOST:-0.0.0.0}"
+STORAGE_DIR="${STORAGE_DIR:-$HOME/Documents/LAN Share/uploads}"
+DATA_DIR="${DATA_DIR:-$HOME/Documents/LAN Share}"
+MAX_STORAGE_SIZE="${MAX_STORAGE_SIZE:-2GB}"
+JAVA_OPTS="${JAVA_OPTS:--Xms128m -Xmx1024m -XX:+UseG1GC -Djava.awt.headless=true}"
+
+# Locate JAR
+if [ -f "$USER_JAR_FILE" ]; then
+    JAR_FILE="$USER_JAR_FILE"
+elif [ -f "$LOCAL_JAR_FILE" ]; then
+    JAR_FILE="$(readlink -f "$LOCAL_JAR_FILE")"
+else
+    JAR_FILE=""
+fi
+
+# Find LAN IP
+get_lan_ip() {
+    ip -4 -br addr show 2>/dev/null | awk '$1 !~ /^(lo|docker|podman|virbr|veth)/ && $2 == "UP" {print $3}' | cut -d/ -f1 | head -n 1
+}
+
+# Check if systemd user unit is installed and functional
+has_systemd_user() {
+    if command -v systemctl >/dev/null 2>&1; then
+        if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR:-}" ]; then
+            if systemctl --user list-unit-files "$USER_SERVICE" >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+# Check if server is running
+is_running() {
+    if has_systemd_user; then
+        if systemctl --user is-active --quiet "$USER_SERVICE" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    if [ -f "$LOCAL_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$LOCAL_PID_FILE" 2>/dev/null || true)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    if curl -s -f "http://127.0.0.1:${PORT}/actuator/health" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+get_pid() {
+    if has_systemd_user && systemctl --user is-active --quiet "$USER_SERVICE" 2>/dev/null; then
+        systemctl --user show --property=MainPID "$USER_SERVICE" | cut -d= -f2
+        return 0
+    fi
+    if [ -f "$LOCAL_PID_FILE" ]; then
+        cat "$LOCAL_PID_FILE" 2>/dev/null
+        return 0
+    fi
+    pgrep -f "lan-share.*\.jar" | head -n 1 || true
+}
+
+cmd_start() {
+    if is_running; then
+        echo "● LAN Share is already running."
+        cmd_status
+        return 0
+    fi
+
+    echo "==> Starting LAN Share..."
+    if has_systemd_user; then
+        systemctl --user start "$USER_SERVICE"
+    else
+        if [ -z "$JAR_FILE" ] || [ ! -f "$JAR_FILE" ]; then
+            echo "Error: LAN Share application JAR not found."
+            exit 1
+        fi
+        mkdir -p "$STORAGE_DIR" "$DATA_DIR/db"
+        local log_file="/tmp/lan-share.log"
+        setsid java $JAVA_OPTS \
+            -Dserver.port="$PORT" \
+            -Dserver.address="$HOST" \
+            -Dlan.storage.location="$STORAGE_DIR" \
+            -Dlan.storage.max-storage-size="$MAX_STORAGE_SIZE" \
+            -DDATA_DIR="$DATA_DIR" \
+            -jar "$JAR_FILE" </dev/null > "$log_file" 2>&1 &
+        echo $! > "$LOCAL_PID_FILE"
+    fi
+
+    echo -n "==> Waiting for server to initialize"
+    local count=0
+    while [ $count -lt 30 ]; do
+        if curl -s -f "http://127.0.0.1:${PORT}/actuator/health" >/dev/null 2>&1 || \
+           curl -s "http://127.0.0.1:${PORT}/api/info" >/dev/null 2>&1; then
+            echo " [READY]"
+            cmd_status
+            return 0
+        fi
+        sleep 0.5
+        echo -n "."
+        count=$((count + 1))
+    done
+    echo ""
+    echo "Notice: Server started but health check took longer than expected."
+    cmd_status
+}
+
+cmd_stop() {
+    echo "==> Stopping LAN Share..."
+    if has_systemd_user; then
+        systemctl --user stop "$USER_SERVICE" || true
+    fi
+    local pid
+    pid=$(get_pid)
+    if [ -n "$pid" ] && [ "$pid" != "0" ] && kill -0 "$pid" 2>/dev/null; then
+        kill -TERM "$pid" 2>/dev/null || true
+        local count=0
+        while kill -0 "$pid" 2>/dev/null; do
+            if [ $count -ge 15 ]; then
+                kill -KILL "$pid" 2>/dev/null || true
+                break
+            fi
+            sleep 0.5
+            count=$((count + 1))
+        done
+    fi
+    rm -f "$LOCAL_PID_FILE"
+    echo "==> LAN Share stopped."
+}
+
+cmd_restart() {
+    echo "==> Restarting LAN Share..."
+    cmd_stop
+    sleep 1
+    cmd_start
+}
+
+cmd_qr() {
+    local target_url="$1"
+    if [ -z "$target_url" ]; then
+        local lan_ip
+        lan_ip=$(get_lan_ip)
+        target_url="http://${lan_ip:-127.0.0.1}:${PORT}"
+    fi
+
+    local qr_tool=""
+    if [ -f "$USER_APP_DIR/tools/terminal_qr.py" ]; then
+        qr_tool="$USER_APP_DIR/tools/terminal_qr.py"
+    elif [ -f "./tools/terminal_qr.py" ]; then
+        qr_tool="./tools/terminal_qr.py"
+    fi
+
+    if [ -n "$qr_tool" ] && command -v python3 >/dev/null 2>&1; then
+        python3 "$qr_tool" "$target_url"
+    elif command -v qrencode >/dev/null 2>&1; then
+        qrencode -t ANSI256 "$target_url"
+    else
+        echo "  (Open $target_url in your browser to view the QR code)"
+    fi
+}
+
+cmd_status() {
+    local lan_ip
+    lan_ip=$(get_lan_ip)
+    local lan_url="http://${lan_ip:-127.0.0.1}:${PORT}"
+    local local_url="http://localhost:${PORT}"
+
+    echo "=================================================================="
+    echo "  LAN Share - $DISTRO_NAME Personal Server"
+    echo "=================================================================="
+
+    if is_running; then
+        local pid
+        pid=$(get_pid)
+        echo "  Status            : ● RUNNING (Active)"
+        [ -n "$pid" ] && [ "$pid" != "0" ] && echo "  Process ID (PID)  : $pid"
+        if has_systemd_user; then
+            echo "  Managed By        : systemd user service ($USER_SERVICE)"
+        else
+            echo "  Managed By        : background daemon"
+        fi
+        
+        local info
+        info=$(curl -s --max-time 2 "http://127.0.0.1:${PORT}/api/info" 2>/dev/null || true)
+        if [ -n "$info" ]; then
+            local quota_text loc file_cnt
+            quota_text=$(echo "$info" | grep -o '"storageQuotaText":"[^"]*"' | cut -d: -f2 | tr -d '"')
+            loc=$(echo "$info" | grep -o '"storageLocation":"[^"]*"' | cut -d: -f2 | tr -d '"')
+            file_cnt=$(echo "$info" | grep -o '"fileCount":[0-9]*' | cut -d: -f2)
+            [ -n "$loc" ] && echo "  Storage Location  : $loc"
+            [ -n "$quota_text" ] && echo "  Storage Quota     : $quota_text"
+            [ -n "$file_cnt" ] && echo "  Shared Files      : $file_cnt"
+        else
+            echo "  Storage Location  : $STORAGE_DIR"
+            echo "  Storage Quota     : $MAX_STORAGE_SIZE"
+        fi
+
+        echo "  Server Port       : $PORT"
+        echo "------------------------------------------------------------------"
+        if [ -n "$lan_ip" ]; then
+            echo "  LAN Access URL    : $lan_url"
+        fi
+        echo "  Local Access URL  : $local_url"
+        echo "=================================================================="
+        echo "  To connect from your phone:"
+        echo "  1. Connect your phone to the same Wi-Fi network."
+        echo "  2. Open mobile browser and visit: $lan_url"
+        echo "  3. Or scan the QR code below:"
+        echo ""
+        cmd_qr "$lan_url"
+    else
+        echo "  Status            : ○ STOPPED (Inactive)"
+        echo "  Storage Location  : $STORAGE_DIR"
+        echo "  Configured Quota  : $MAX_STORAGE_SIZE"
+        echo "  Server Port       : $PORT"
+        echo "=================================================================="
+        echo "  Start LAN Share with: lanshare start"
+    fi
+}
+
+cmd_set_quota() {
+    local new_quota="$1"
+    if [ -z "$new_quota" ]; then
+        echo "Error: Please specify the desired quota limit (e.g. 5GB, 10GB, 500MB)."
+        echo "Usage: lanshare set-quota <size>"
+        exit 1
+    fi
+
+    new_quota=$(echo "$new_quota" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+    if [[ ! "$new_quota" =~ ^[0-9]+(\.[0-9]+)?(GB|G|MB|M|KB|K|B)?$ ]]; then
+        echo "Error: Invalid quota format '$new_quota'. Example: 2GB, 5GB, 500MB"
+        exit 1
+    fi
+    if [[ ! "$new_quota" =~ (GB|G|MB|M|KB|K|B)$ ]]; then
+        new_quota="${new_quota}GB"
+    fi
+
+    echo "==> Setting LAN Share application storage quota to $new_quota..."
+
+    if [ -n "$CONF_FILE" ] && [ -f "$CONF_FILE" ]; then
+        if grep -q "^MAX_STORAGE_SIZE=" "$CONF_FILE"; then
+            sed -i "s/^MAX_STORAGE_SIZE=.*/MAX_STORAGE_SIZE=$new_quota/" "$CONF_FILE"
+        else
+            echo "MAX_STORAGE_SIZE=$new_quota" >> "$CONF_FILE"
+        fi
+        echo "  Updated configuration file: $CONF_FILE"
+    fi
+
+    if is_running; then
+        local res
+        res=$(curl -s -X POST -H "Content-Type: application/json" -d "{\"quota\": \"$new_quota\"}" "http://127.0.0.1:${PORT}/api/info/quota" 2>/dev/null || true)
+        if echo "$res" | grep -q '"success":true'; then
+            echo "  Active server updated dynamically: $new_quota"
+        else
+            echo "  Restarting service to apply changes..."
+            cmd_restart
+        fi
+    fi
+    echo "==> Storage quota successfully configured to $new_quota."
+}
+
+cmd_logs() {
+    local follow=false
+    local lines=50
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -f|--follow) follow=true; shift ;;
+            -n|--lines) lines="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if has_systemd_user; then
+        if [ "$follow" = true ]; then
+            journalctl --user -u "$USER_SERVICE" -n "$lines" -f
+        else
+            journalctl --user -u "$USER_SERVICE" -n "$lines" --no-pager
+        fi
+    elif [ -f "/tmp/lan-share.log" ]; then
+        if [ "$follow" = true ]; then
+            tail -n "$lines" -f "/tmp/lan-share.log"
+        else
+            tail -n "$lines" "/tmp/lan-share.log"
+        fi
+    elif [ -f "./logs/lan-share.log" ]; then
+        if [ "$follow" = true ]; then
+            tail -n "$lines" -f "./logs/lan-share.log"
+        else
+            tail -n "$lines" "./logs/lan-share.log"
+        fi
+    else
+        echo "No log output found."
+    fi
+}
+
+cmd_open() {
+    if ! is_running; then
+        echo "LAN Share is not running. Starting it now..."
+        cmd_start
+    fi
+    local url="http://localhost:${PORT}"
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" >/dev/null 2>&1 &
+    else
+        echo "Open in browser: $url"
+    fi
+}
+
+cmd_help() {
+    cat << 'HELPEOF'
+LAN Share - Personal Local File & Link Sharing for Linux (Fedora & Ubuntu)
+
+Usage:
+  lanshare <command> [arguments]
+
+Commands:
+  start             Start LAN Share service in the background
+  stop              Stop running LAN Share service gracefully
+  restart           Restart LAN Share service
+  status            Display server status, storage quota, LAN URLs, and QR code
+  open              Open LAN Share in default web browser (starts server if stopped)
+  set-quota <size>  Configure application storage limit (e.g., 2GB, 5GB, 500MB)
+  qr                Display the QR code to pair your phone on the local Wi-Fi
+  logs [-f] [-n N]  View or stream server systemd/journal logs
+  help, --help, -h  Show this help message
+
+Examples:
+  lanshare start
+  lanshare status
+  lanshare set-quota 5GB
+  lanshare open
+  lanshare logs -f
+HELPEOF
+}
+
+case "${1:-}" in
+    start) shift; cmd_start "$@" ;;
+    stop) shift; cmd_stop "$@" ;;
+    restart) shift; cmd_restart "$@" ;;
+    status) shift; cmd_status "$@" ;;
+    open) shift; cmd_open "$@" ;;
+    set-quota|quota) shift; cmd_set_quota "$@" ;;
+    qr) shift; cmd_qr "$@" ;;
+    logs) shift; cmd_logs "$@" ;;
+    uninstall)
+        if [ -f "$USER_APP_DIR/uninstall.sh" ]; then
+            exec "$USER_APP_DIR/uninstall.sh" "$@"
+        else
+            echo "Uninstall script not found at $USER_APP_DIR/uninstall.sh"
+        fi
+        ;;
+    help|--help|-h|"") cmd_help ;;
+    *)
+        echo "Error: Unknown command '$1'"
+        echo "Run 'lanshare help' to see available commands."
+        exit 1
+        ;;
+esac

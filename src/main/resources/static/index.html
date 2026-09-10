@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>LAN Share - Local File & Link Sharing</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Fullscreen Drag & Drop Overlay for Desktop -->
+  <div class="window-drop-overlay" id="windowDropOverlay">
+    <div class="drop-overlay-box">
+      <div class="drop-overlay-icon">📥</div>
+      <div class="drop-overlay-title">Drop files anywhere to upload</div>
+      <div class="drop-overlay-sub">Direct LAN transfer to your Linux PC</div>
+    </div>
+  </div>
+
+  <!-- Top Navigation Header -->
+  <header class="header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">⇄</div>
+        <div>
+          <div class="brand-title">LAN Share</div>
+          <div class="brand-subtitle">Personal Local Cloud</div>
+        </div>
+        <span class="brand-badge" id="statusBadge">Online</span>
+      </div>
+
+      <div class="header-actions">
+        <div class="server-ip-pill" id="serverIpDisplay" title="Click to copy server address">Loading IP...</div>
+        <button class="btn-qr" id="openQrBtn" title="Show QR Code to connect your phone">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>Connect Phone</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Network Offline Alert Banner (hidden by default) -->
+  <div class="offline-banner" id="offlineBanner">
+    ⚠️ Unable to connect to server. Retrying connection...
+  </div>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+    <!-- Storage & Server Stats Banner -->
+    <div class="stats-banner">
+      <div class="stat-box">
+        <span class="stat-label">Linux Server</span>
+        <span class="stat-val stat-code" id="bannerUrl">--</span>
+      </div>
+      <div class="stat-box stat-storage-box">
+        <div class="stat-storage-header">
+          <span class="stat-label">LAN Share Storage</span>
+          <span class="stat-val" id="statStorageQuota">-- / 2 GB</span>
+        </div>
+        <div class="storage-progress-track" title="LAN Share Storage Quota Usage">
+          <div class="storage-progress-bar" id="storageProgressBar" style="width: 0%;"></div>
+        </div>
+        <div class="stat-storage-sub" id="statStorageLocation" title="Storage Location">Location: ...</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Uploaded Files</span>
+        <span class="stat-val" id="statFilesCount">0</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Saved Links</span>
+        <span class="stat-val" id="statLinksCount">0</span>
+      </div>
+    </div>
+
+    <!-- Desktop Navigation Tabs / Layout Switcher -->
+    <div class="tabs-header">
+      <nav class="tabs-nav" id="mainTabsNav">
+        <button class="tab-btn active" id="tabFilesBtn" data-target="tabFiles">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span>Files</span>
+          <span class="tab-count" id="filesTabBadge">0</span>
+        </button>
+        <button class="tab-btn" id="tabLinksBtn" data-target="tabLinks">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span>Saved Links</span>
+          <span class="tab-count" id="linksTabBadge">0</span>
+        </button>
+      </nav>
+
+      <!-- Desktop View Mode (Tabs vs Split View on wide screens) -->
+      <button class="btn btn-secondary desktop-split-toggle" id="splitToggleBtn" title="Toggle side-by-side split view">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+        <span>Side-by-Side</span>
+      </button>
+    </div>
+
+    <!-- Dashboard Container (Can toggle to split-view on desktop) -->
+    <div class="dashboard-grid" id="dashboardGrid">
+      
+      <!-- ================= SECTION 1: FILES PANE ================= -->
+      <section id="tabFiles" class="tab-pane active dashboard-col">
+        <!-- Upload Card -->
+        <div class="card upload-card">
+          <div class="card-title">
+            <span>Upload to Linux PC</span>
+            <span class="badge-tag">Direct LAN • No Cloud</span>
+          </div>
+
+          <!-- Hidden File Input -->
+          <input type="file" id="fileInput" class="file-input-hidden" multiple>
+
+          <!-- Dropzone -->
+          <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload files">
+            <div class="dropzone-icon">
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            
+            <div class="dropzone-desktop-prompt">
+              <div class="dropzone-text">Drag & drop files here</div>
+              <div class="dropzone-subtext">or click to browse from this device</div>
+            </div>
+
+            <!-- Large Obvious Upload Button for Mobile (One Hand Reach) -->
+            <button type="button" class="btn btn-primary btn-mobile-upload" id="mobileSelectBtn">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+              <span>Select Files or Photos</span>
+            </button>
+          </div>
+
+          <!-- Password Protection Toggle for Upload -->
+          <div class="upload-protect-section">
+            <label class="protect-checkbox-label">
+              <input type="checkbox" id="protectUploadCheckbox" class="protect-checkbox">
+              <span class="protect-custom-checkbox"></span>
+              <span class="protect-label-text">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Password protect this file
+              </span>
+            </label>
+            <div class="upload-password-field" id="uploadPasswordGroup" style="display: none;">
+              <input type="password" id="uploadPasswordInput" class="form-control" placeholder="Set password for download/preview" autocomplete="new-password">
+              <span class="upload-password-hint">Anyone downloading or previewing this file will need this password.</span>
+            </div>
+          </div>
+
+          <!-- Real-time Upload Progress Bar Card -->
+          <div class="upload-progress-container" id="uploadProgressContainer">
+            <div class="progress-info-row">
+              <div class="progress-file-name" id="uploadFileName">Uploading...</div>
+              <div class="progress-pct" id="uploadPercentage">0%</div>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="uploadProgressFill"></div>
+            </div>
+            <div class="progress-meta-row">
+              <span id="uploadBytesText">0 B / 0 B</span>
+              <span id="uploadSpeedText">--</span>
+              <span id="uploadEtaText"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Files List Card -->
+        <div class="card">
+          <div class="card-header-row">
+            <div class="card-title-group">
+              <h2 class="card-title-text">Uploaded Files</h2>
+              <span class="filter-count-badge" id="filesFilterCount"></span>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="refreshFilesBtn" title="Refresh files list">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <!-- Search & Category Filters -->
+          <div class="filter-controls">
+            <div class="search-box">
+              <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="fileSearchInput" class="search-input" placeholder="Filter files by name or extension..." autocomplete="off">
+              <button type="button" class="btn-clear-search" id="clearFileSearchBtn" title="Clear search">✕</button>
+            </div>
+
+            <!-- Filter Chips -->
+            <div class="filter-chips" id="fileTypeChips">
+              <button class="chip active" data-filter="all">All</button>
+              <button class="chip" data-filter="image">Images</button>
+              <button class="chip" data-filter="video">Videos</button>
+              <button class="chip" data-filter="document">Documents</button>
+              <button class="chip" data-filter="archive">Archives</button>
+            </div>
+          </div>
+
+          <!-- Loading Skeleton Container -->
+          <div class="skeleton-container" id="filesSkeleton">
+            <div class="skeleton-card"></div>
+            <div class="skeleton-card"></div>
+            <div class="skeleton-card"></div>
+          </div>
+
+          <!-- Actual Items List Container -->
+          <div class="items-grid" id="filesListContainer">
+            <!-- Rendered by JavaScript -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SECTION 2: LINKS PANE ================= -->
+      <section id="tabLinks" class="tab-pane dashboard-col">
+        <!-- Save Link Form Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>Share a Link</span>
+            <span class="badge-tag">Instant Sync</span>
+          </div>
+
+          <form id="saveLinkForm" novalidate>
+            <div class="form-group">
+              <label class="form-label" for="linkUrl">Web Address (URL) *</label>
+              <div class="input-with-button">
+                <input type="url" id="linkUrl" class="form-control" placeholder="https://example.com or paste link" required autocomplete="off">
+                <button type="button" class="btn btn-secondary" id="pasteClipboardBtn" title="Paste from clipboard">
+                  📋 Paste
+                </button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="linkTitle">Title or Note (Optional)</label>
+              <input type="text" id="linkTitle" class="form-control" placeholder="Descriptive title or context...">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block" id="saveLinkSubmitBtn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+              <span>Save & Share Link</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Saved Links List Card -->
+        <div class="card">
+          <div class="card-header-row">
+            <div class="card-title-group">
+              <h2 class="card-title-text">Saved Links</h2>
+              <span class="filter-count-badge" id="linksFilterCount"></span>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="refreshLinksBtn" title="Refresh links list">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <div class="filter-controls">
+            <div class="search-box">
+              <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="linkSearchInput" class="search-input" placeholder="Search links by title or URL..." autocomplete="off">
+              <button type="button" class="btn-clear-search" id="clearLinkSearchBtn" title="Clear search">✕</button>
+            </div>
+          </div>
+
+          <!-- Loading Skeleton Container -->
+          <div class="skeleton-container" id="linksSkeleton">
+            <div class="skeleton-card"></div>
+            <div class="skeleton-card"></div>
+          </div>
+
+          <!-- Actual Links List Container -->
+          <div class="items-grid" id="linksListContainer">
+            <!-- Rendered by JavaScript -->
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ================= MOBILE ONE-HANDED BOTTOM NAV ================= -->
+  <nav class="mobile-bottom-bar" id="mobileBottomBar">
+    <button class="bottom-nav-item active" id="mobileNavFiles" data-target="tabFiles">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span>Files</span>
+    </button>
+
+    <!-- Prominent Center Thumb Upload Action Button -->
+    <button class="bottom-nav-fab" id="mobileFabUpload" aria-label="Upload File">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+
+    <button class="bottom-nav-item" id="mobileNavLinks" data-target="tabLinks">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      <span>Links</span>
+    </button>
+
+    <button class="bottom-nav-item" id="mobileNavQr">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      <span>Pair QR</span>
+    </button>
+  </nav>
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- 1. Connect Phone QR Code Modal -->
+  <div class="modal-overlay" id="qrModal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Connect Phone</h3>
+        <button class="modal-close-btn" id="closeQrXBtn">✕</button>
+      </div>
+      <div class="modal-subtitle">Point your phone camera at this QR code to open LAN Share directly:</div>
+      <div class="qr-code-box" id="qrcode"></div>
+      <div class="qr-url-text" id="qrUrlDisplay" title="Click to copy URL">Loading URL...</div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="copyUrlBtn">📋 Copy Address</button>
+        <button class="btn btn-primary" id="closeQrBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Custom Delete Confirmation Modal / Mobile Bottom Sheet -->
+  <div class="modal-overlay" id="confirmModal" role="dialog" aria-modal="true">
+    <div class="confirm-box">
+      <div class="confirm-icon">🗑️</div>
+      <h3 class="confirm-title" id="confirmTitle">Confirm Deletion</h3>
+      <p class="confirm-message" id="confirmMessage">Are you sure you want to delete this item? This action cannot be undone.</p>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary btn-large" id="confirmCancelBtn">Cancel</button>
+        <button class="btn btn-danger btn-large" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Media Preview Modal (Lightbox) -->
+  <div class="modal-overlay" id="previewModal" role="dialog" aria-modal="true">
+    <div class="preview-modal-content">
+      <div class="preview-header">
+        <span class="preview-filename" id="previewFileName">Preview</span>
+        <button class="modal-close-btn" id="closePreviewBtn">✕</button>
+      </div>
+      <div class="preview-body" id="previewBody">
+        <!-- Injected media element (img, video, audio, or iframe) -->
+      </div>
+      <div class="preview-footer">
+        <a href="#" id="previewDownloadBtn" class="btn btn-primary btn-sm">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Original
+        </a>
+      </div>
+    </div>
+  <!-- 4. Password Prompt Modal for Protected File Download/Preview -->
+  <div class="modal-overlay" id="passwordModal" role="dialog" aria-modal="true">
+    <div class="password-prompt-box">
+      <div class="password-prompt-header">
+        <div class="password-prompt-icon">🔒</div>
+        <button class="modal-close-btn" id="closePasswordXBtn">✕</button>
+      </div>
+      <h3 class="password-prompt-title" id="passwordModalTitle">Password Required</h3>
+      <p class="password-prompt-subtitle" id="passwordModalSubtitle">Enter password to unlock this file:</p>
+      <form id="passwordPromptForm" autocomplete="off">
+        <div class="form-group" style="margin-bottom: 14px;">
+          <input type="password" id="promptPasswordInput" class="form-control" placeholder="Enter file password" required autofocus autocomplete="current-password">
+          <div class="password-modal-error" id="passwordModalError" style="display: none;"></div>
+        </div>
+        <div class="password-modal-actions">
+          <button type="button" class="btn btn-secondary btn-large" id="passwordCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-large" id="passwordSubmitBtn">Unlock &amp; Proceed</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Stack -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <!-- Offline / Local Scripts -->
+  <script src="/js/qrcode.min.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LAN Share
+GenericName=LAN File Sharing
+Comment=Fast, private local network file & link sharing
+Exec=lanshare open
+Icon=lan-share
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=share;transfer;lan;wifi;local;files;upload;download;
+StartupNotify=true

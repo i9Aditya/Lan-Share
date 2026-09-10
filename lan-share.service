@@ -1,0 +1,55 @@
+[Unit]
+Description=LAN Share - Personal File & Link Sharing Server
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/lan-share
+
+# Default environment variables
+Environment="PORT=8080"
+Environment="HOST=0.0.0.0"
+Environment="STORAGE_DIR=%h/Documents/LAN Share/uploads"
+Environment="DATA_DIR=%h/Documents/LAN Share"
+Environment="MAX_STORAGE_SIZE=2GB"
+Environment="MAX_FILE_SIZE=5120MB"
+Environment="MAX_REQUEST_SIZE=5120MB"
+Environment="JAVA_OPTS=-Xms128m -Xmx1024m -XX:+UseG1GC -Djava.awt.headless=true"
+
+# Load user configuration if present (overrides the defaults above)
+EnvironmentFile=-%h/.config/lan-share/lan-share.conf
+
+# Pre-execution directory guarantee
+ExecStartPre=/usr/bin/bash -c 'mkdir -p "${STORAGE_DIR}" "${DATA_DIR}/db"'
+
+# Application execution
+ExecStart=/usr/bin/java $JAVA_OPTS \
+    -Dserver.port=${PORT} \
+    -Dserver.address=${HOST} \
+    -Dlan.storage.location=${STORAGE_DIR} \
+    -Dlan.storage.max-storage-size=${MAX_STORAGE_SIZE} \
+    -DDATA_DIR=${DATA_DIR} \
+    -Dconf.file=%h/.config/lan-share/lan-share.conf \
+    -Dspring.servlet.multipart.max-file-size=${MAX_FILE_SIZE} \
+    -Dspring.servlet.multipart.max-request-size=${MAX_REQUEST_SIZE} \
+    -jar %h/.local/share/lan-share/lan-share.jar
+
+# Process lifecycle and graceful shutdown
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=25s
+KillSignal=SIGTERM
+SendSIGKILL=yes
+SuccessExitStatus=143
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lan-share
+
+# File descriptor limits for concurrent downloads/uploads
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target
