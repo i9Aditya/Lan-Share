@@ -34,7 +34,7 @@ A fast, lightweight, personal local-network file and link sharing application bu
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-username>/lan-share.git
+git clone https://github.com/i9Aditya/lan-share.git
 cd lan-share
 ```
 
