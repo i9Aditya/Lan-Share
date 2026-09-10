@@ -668,7 +668,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     filesListContainer.querySelectorAll('.preview-file-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const id = btn.getAttribute('data-id');
         const name = btn.getAttribute('data-name');
         const type = btn.getAttribute('data-type');
@@ -682,7 +683,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     filesListContainer.querySelectorAll('.protected-download-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const id = btn.getAttribute('data-id');
         const name = btn.getAttribute('data-name');
         promptFilePassword(id, name, 'download');
@@ -1005,6 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pendingPasswordAction = { fileId, fileName, action, fileType };
     passwordModalTitle.textContent = action === 'download' ? 'Download Protected File' : 'Preview Protected File';
     passwordModalSubtitle.textContent = `Enter password for "${fileName}":`;
+    passwordSubmitBtn.textContent = action === 'download' ? 'Unlock & Download' : 'Unlock & Preview';
     promptPasswordInput.value = '';
     passwordModalError.style.display = 'none';
     passwordModalError.textContent = '';
@@ -1017,6 +1020,9 @@ document.addEventListener('DOMContentLoaded', () => {
     pendingPasswordAction = null;
     promptPasswordInput.value = '';
     passwordModalError.style.display = 'none';
+    passwordModalError.textContent = '';
+    passwordSubmitBtn.disabled = false;
+    passwordSubmitBtn.textContent = 'Unlock & Proceed';
   }
 
   async function handlePasswordSubmit(e) {
@@ -1030,11 +1036,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const currentAction = pendingPasswordAction;
     passwordSubmitBtn.disabled = true;
     passwordSubmitBtn.textContent = 'Verifying...';
 
     try {
-      const res = await fetch(`/api/files/${pendingPasswordAction.fileId}/verify-password`, {
+      const res = await fetch(`/api/files/${currentAction.fileId}/verify-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
@@ -1050,20 +1057,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await res.json();
       const token = data.token;
-      const { fileId, fileName, action, fileType } = pendingPasswordAction;
       closePasswordPrompt();
 
-      if (action === 'download') {
-        window.location.href = `/api/files/${fileId}/download?token=${encodeURIComponent(token)}`;
-      } else if (action === 'preview') {
-        openPreview(fileId, fileName, fileType, token);
+      if (currentAction.action === 'download') {
+        const downloadUrl = `/api/files/${currentAction.fileId}/download?token=${encodeURIComponent(token)}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = currentAction.fileName || '';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (document.body.contains(a)) {
+            document.body.removeChild(a);
+          }
+        }, 100);
+        showToast('Download started', 'success');
+      } else if (currentAction.action === 'preview') {
+        openPreview(currentAction.fileId, currentAction.fileName, currentAction.fileType, token);
       }
     } catch (err) {
       passwordModalError.textContent = 'Connection error: ' + err.message;
       passwordModalError.style.display = 'block';
     } finally {
-      passwordSubmitBtn.disabled = false;
-      passwordSubmitBtn.textContent = 'Unlock & Proceed';
+      if (pendingPasswordAction) {
+        passwordSubmitBtn.disabled = false;
+        passwordSubmitBtn.textContent = pendingPasswordAction.action === 'download' ? 'Unlock & Download' : 'Unlock & Preview';
+      }
     }
   }
 
@@ -1071,6 +1091,7 @@ document.addEventListener('DOMContentLoaded', () => {
     previewFileName.textContent = fileName;
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
     previewDownloadBtn.href = `/api/files/${fileId}/download${tokenParam}`;
+    previewDownloadBtn.setAttribute('download', fileName || '');
     previewBody.innerHTML = '';
 
     const previewUrl = `/api/files/${fileId}/preview${tokenParam}`;
@@ -1109,6 +1130,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const media = previewBody.querySelector('video, audio');
     if (media) media.pause();
     previewBody.innerHTML = '';
+    previewDownloadBtn.href = '#';
+    previewDownloadBtn.removeAttribute('download');
     closeModal(previewModal);
   }
 

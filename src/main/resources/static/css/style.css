@@ -1816,8 +1816,8 @@ body {
   padding: 1.5rem;
   width: 90%;
   max-width: 400px;
-  box-shadow: var(--shadow-modal);
-  animation: modalFadeIn 0.25s ease-out;
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.15s ease-out;
 }
 
 .password-prompt-header {
